@@ -171,6 +171,51 @@ Sample pillar with custom logging
             port: 5000
             params: check
 
+Sample pillar with SSL and LetsEncrypt
+======================================
+
+.. code-block:: yaml
+
+    _param:
+      haproxy_ssl_cert: ${_param:cluster_ext_int_domain_name}.crt
+    haproxy:
+      proxy:
+        ssl:
+          cert: ${_param:haproxy_ssl_cert}
+        listen:
+          horizon_web:
+            format: end
+            type: http
+            binds:
+            - address: ${_param:cluster_vip_address}
+              port: 80
+            servers:
+            - name: ${_param:web_node01_hostname}
+              host: ${_param:web_node01_address}
+              port: 80
+              params: check
+            acls:
+            - name: letsencrypt
+              conditions:
+              - type: path_beg
+                condition: /.well-known/acme-challenge/
+              servers:
+              - name: ${_param:cfg_node01_hostname}
+                host: ${_param:cfg_node01_address}
+                port: 9999
+          horizon_web_https:
+            type: https
+            binds:
+            - address: ${_param:cluster_vip_address}
+              port: 443
+              cert: /etc/haproxy/${_param:haproxy_ssl_cert}
+            servers:
+            - name: ${_param:web_node01_hostname}
+              host: ${_param:web_node01_address}
+              port: 80
+              params: check
+
+
 Read more
 =========
 
