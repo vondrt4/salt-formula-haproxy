@@ -1,29 +1,29 @@
 {%- from "haproxy/map.jinja" import proxy with context -%}
 {%- from "linux/map.jinja" import network with context -%}
-{%- if grains.ipv4[0] == '127.0.0.1' %}{% set address =  grains.ipv4[1] %}{% else %}{% set address =  grains.ipv4[0] %}{% endif %}
+{%- if grains.ipv4[0] == '127.0.0.1' %}{% set address = grains.ipv4[1] %}{% else %}{% set address = grains.ipv4[0] %}{% endif %}
 check:
   local_haproxy_server_proc:
     command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_procs -C haproxy -u haproxy -c 1:1"
     interval: 60
     occurrences: 1
     subscribers:
-    - local-haproxy-server
+    - local-haproxy-proxy
   {# remote_haproxy_proxy_metrics_{{ network.fqdn }}:
     command: "PATH=$PATH:/etc/sensu/plugins haproxy-metrics.rb -c {{ address }} -P 9600 -u admin -p admin"
     interval: 60
     occurrences: 1
     subscribers:
-    - remote_network
+    - remote_network #}
   remote_haproxy_proxy_status_{{ network.fqdn }}:
     command: "PATH=$PATH:/etc/sensu/plugins check-haproxy.rb -S {{ address }} -P 9600 -u admin -p admin -A"
     interval: 60
     occurrences: 1
     subscribers:
-    - remote_network #}
+    - remote_network
 {%- for listen_name, listen in proxy.get('listen', {}).iteritems() %}
-{%- if listen.get('check', True) %}
+{%- if listen.get('check', True) and grains.host == "ctl01" %}
 {%- if listen.binds.0.address|length == 1 or listen.binds.0.address == '0.0.0.0' %}
-{% if grains.ipv4[0] == '127.0.0.1' %}{% set address =  grains.ipv4[1] %}{% else %}{% set address =  grains.ipv4[0] %}{% endif %}
+{% if grains.ipv4[0] == '127.0.0.1' %}{% set address = grains.ipv4[1] %}{% else %}{% set address = grains.ipv4[0] %}{% endif %}
 {%- else %}
 {%- set address = listen.binds.0.address %}
 {%- endif %}
@@ -35,12 +35,58 @@ check:
     subscribers:
     - remote-network
 {%- else %}
-  remote_haproxy_proxy_tcp_{{ listen_name }}_{{ network.fqdn }}:
+  remote_haproxy_service_tcp_{{ listen_name }}:
     command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_tcp -H {{ address }} -p {{ listen.binds.0.port }} -w 5 -c 10"
     interval: 60
     occurrences: 1
     subscribers:
     - remote-network
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+{%- for listen_name, listen in proxy.get('listen', {}).iteritems() %}
+{%- if listen.get('check', True) and listen.get('check_backend', True) %}
+{%- set found_locally = false %}
+{%- for server in listen.get('servers', {}) %}
+{%- if server.name == grains.host %}
+{% if grains.ipv4[0] == '127.0.0.1' %}{% set address = grains.ipv4[1] %}{% else %}{% set address = grains.ipv4[0] %}{% endif %}
+{%- set found_locally = true %}
+{%- if listen.type in ['general-service', 'openstack-service', 'http', 'contrail-api', 'admin'] %}
+  remote_haproxy_backend_http_{{ listen_name }}_{{ grains.host }}:
+    command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_http -H {{ address }} -p {{ server.port }} -w 5 -c 10"
+    interval: 60
+    occurrences: 1
+    subscribers:
+    - remote-network
+{%- else %}
+  remote_haproxy_backend_tcp_{{ listen_name }}_{{ grains.host }}:
+    command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_tcp -H {{ address }} -p {{ server.port }} -w 5 -c 10"
+    interval: 60
+    occurrences: 1
+    subscribers:
+    - remote-network
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+{%- if found_locally == false and grains.host == "ctl01" and listen.servers%}
+{%- for server in listen.get('servers', {}) %}
+{%- set address = server.host %}
+{%- if listen.type in ['general-service', 'openstack-service', 'http', 'contrail-api', 'admin'] %}
+  remote_haproxy_backend_http_{{ listen_name }}_{{ server.name }}:
+    command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_http -H {{ address }} -p {{ server.port }} -w 5 -c 10"
+    interval: 60
+    occurrences: 1
+    subscribers:
+    - remote-network
+{%- else %}
+  remote_haproxy_backend_tcp_{{ listen_name }}_{{ server.name }}:
+    command: "PATH=$PATH:/usr/lib64/nagios/plugins:/usr/lib/nagios/plugins check_tcp -H {{ address }} -p {{ server.port }} -w 5 -c 10"
+    interval: 60
+    occurrences: 1
+    subscribers:
+    - remote-network
+{%- endif %}
+{%- endfor %}
 {%- endif %}
 {%- endif %}
 {%- endfor %}
